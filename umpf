@@ -231,6 +231,7 @@ usage() {
 
 	  continue                   continue a previously interrupted umpf command
 	  abort                      abort a previously started umpf command
+	  status                     show progress of a running umpf command
 
 	  init <seriesfile>          manually create an umpf series file by
 	                             answering questions
@@ -2010,6 +2011,92 @@ do_push () {
 
 do_pull () {
 	GIT_REMOTE=refs/heads/ do_push "$@"
+}
+
+### command: status ###
+
+do_status() {
+	prepare
+
+	if ! test -f "${STATE}/command"; then
+		info "No umpf in progress."
+		return
+	fi
+
+	local command base_name umpf_name
+	command="$(<"${STATE}/command")"
+	base_name=
+	umpf_name=
+	test -f "${STATE}/base-name" && base_name="$(<"${STATE}/base-name")"
+	test -f "${STATE}/name" && umpf_name="$(<"${STATE}/name")"
+
+	info "umpf ${command} in progress"
+	if [ -n "${base_name}" ]; then
+		info "  base: ${base_name}"
+	fi
+	if [ -n "${umpf_name}" ]; then
+		info "  name: ${umpf_name}"
+	fi
+	info
+
+	# collect all topic names from the series
+	local -a all_topics
+	local topic_line
+	while IFS= read -r topic_line; do
+		all_topics+=("${topic_line}")
+	done < <(sed -n -r 's/^# umpf-(squash-)?topic: *(.*)$/\2/p' "${STATE}/series")
+
+	if [ ${#all_topics[@]} -eq 0 ]; then
+		info "  (no topics)"
+		return
+	fi
+
+	# collect done topic names
+	local -a done_topics
+	if [ -f "${STATE}/done" ]; then
+		while IFS= read -r topic_line; do
+			done_topics+=("${topic_line}")
+		done < <(sed -n -r 's/^# umpf-(squash-)?topic: *(.*)$/\2/p' "${STATE}/done")
+	fi
+
+	# identify the failed topic
+	local failed_topic=
+	if [ -f "${STATE}/failed" ]; then
+		failed_topic="$(sed -n -r 's/^# umpf-(squash-)?topic: *(.*)$/\2/p' "${STATE}/failed")"
+	fi
+
+	local n_done=${#done_topics[@]}
+	local n_total=${#all_topics[@]}
+	local topic found status found_current=false
+	for topic in "${all_topics[@]}"; do
+		found=false
+		for done_t in "${done_topics[@]}"; do
+			if [ "${topic}" = "${done_t}" ]; then
+				found=true
+				break
+			fi
+		done
+		if ${found}; then
+			status="done"
+		elif [ -n "${failed_topic}" ] && [ "${topic}" = "${failed_topic}" ]; then
+			status="FAILED"
+			found_current=true
+		elif ! ${found_current}; then
+			status="active"
+			found_current=true
+		else
+			status="pending"
+		fi
+		info "  ${status}	${topic}"
+	done
+
+	info
+	info "${n_done}/${n_total} topics done."
+	if [ -n "${failed_topic}" ]; then
+		info
+		info "Topic '${failed_topic}' has failed."
+		info "Use 'umpf continue' after resolving, or 'umpf skip' to skip it."
+	fi
 }
 
 ### command: continue ###

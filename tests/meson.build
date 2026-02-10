@@ -23,7 +23,8 @@ tests = [
   'umpf-format-patch',
   'umpf-format-patch-bb',
   'umpf-show',
-  'umpf-versions'
+  'umpf-versions',
+  'umpf-status'
 ]
 foreach test_name : tests
   test(test_name, run_test, args: test_name, env: test_env)
