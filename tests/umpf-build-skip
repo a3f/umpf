@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Test skipping a conflicting topic during "umpf build".
+#
+
+# start umpf build, which will fail on a3 (conflicts with a2)
+umpf build series.conflict --remote=origin || test $? = 1
+
+# check status shows the failed topic
+umpf status 2>&1 | grep "done	a2"
+umpf status 2>&1 | grep "FAILED	a3"
+umpf status 2>&1 | grep "pending	b"
+umpf status 2>&1 | grep "1/3 topics done"
+
+# skip the failing topic
+umpf skip
+
+# the result should have a2 and b merged, but not a3
+umpf show 2>&1 > series.build
+diff -u ${TEST_DIR}/series-build-skip.ref series.build
+
+# status should report no umpf in progress
+umpf status 2>&1 | grep "No umpf in progress"

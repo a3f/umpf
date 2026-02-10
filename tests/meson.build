@@ -24,7 +24,9 @@ tests = [
   'umpf-format-patch-bb',
   'umpf-show',
   'umpf-versions',
-  'umpf-status'
+  'umpf-status',
+  'umpf-series-tag-skip',
+  'umpf-build-skip'
 ]
 foreach test_name : tests
   test(test_name, run_test, args: test_name, env: test_env)

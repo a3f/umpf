@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# Test skipping a conflicting topic during "umpf tag".
+#
+
+# start umpf tag, which will fail on a3 (conflicts with a2)
+umpf tag --version=3 series.conflict --remote=origin || test $? = 1
+diff -u ${TEST_DIR}/conflict-failed.ref .git/umpf/failed
+
+# check status shows the failed topic
+umpf status 2>&1 | grep "done	a2"
+umpf status 2>&1 | grep "FAILED	a3"
+umpf status 2>&1 | grep "pending	b"
+umpf status 2>&1 | grep "1/3 topics done"
+
+# skip the failing topic
+umpf skip
+
+# verify the resulting tag: a3 has topic+hashinfo but no topic-range
+git log --format=%B -n 1 | grep "^# umpf-" > series.tag
+diff -u ${TEST_DIR}/series-conflict-skip-v3.ref series.tag
+
+# status should report no umpf in progress
+umpf status 2>&1 | grep "No umpf in progress"

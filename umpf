@@ -232,6 +232,7 @@ usage() {
 	  continue                   continue a previously interrupted umpf command
 	  abort                      abort a previously started umpf command
 	  status                     show progress of a running umpf command
+	  skip                       skip the current topic and continue
 
 	  init <seriesfile>          manually create an umpf series file by
 	                             answering questions
@@ -2097,6 +2098,76 @@ do_status() {
 		info "Topic '${failed_topic}' has failed."
 		info "Use 'umpf continue' after resolving, or 'umpf skip' to skip it."
 	fi
+}
+
+### command: skip ###
+
+do_skip() {
+	prepare
+
+	test -f "${STATE}/command" || bailout "nothing to skip!"
+	test -f "${STATE}/failed" || bailout "no failed topic to skip!"
+
+	local failed_line command
+	failed_line="$(<"${STATE}/failed")"
+	command="$(<"${STATE}/command")"
+
+	# source config to restore runtime state
+	# shellcheck source=/dev/null
+	. "${STATE}/config" || bailout "Failed to source '${STATE}/config'"
+
+	local topic_name
+	topic_name="$(sed -n -r 's/^# umpf-(squash-)?topic: *(.*)$/\2/p' <<< "${failed_line}")"
+
+	# abort any in-progress git operation
+	if [[ -d "${GIT_DIR}/rebase-apply" || -d "${GIT_DIR}/rebase-merge" ]]; then
+		${GIT} rebase --abort
+	fi
+	if [ -f "${GIT_DIR}/CHERRY_PICK_HEAD" ]; then
+		${GIT} cherry-pick --abort
+	fi
+	if [ -f "${GIT_DIR}/MERGE_HEAD" ]; then
+		${GIT} merge --abort
+	fi
+
+	# command-specific cleanup
+	case "${command}" in
+	tag)
+		# restore HEAD to before the failed rebase
+		if [ -f "${STATE}/prev_head" ]; then
+			${GIT} checkout -q "$(<"${STATE}/prev_head")"
+		fi
+		# remove the topicrev that was added before the rebase started
+		if [ -f "${STATE}/topics" ]; then
+			sed -i '$ d' "${STATE}/topics"
+		fi
+		;;
+	build)
+		# git merge --abort already restored HEAD; nothing else needed
+		;;
+	esac
+
+	# mark the failed topic as done (skipped) and clear failure
+	echo "${failed_line}" >> "${STATE}/done"
+	rm -f "${STATE}/failed"
+
+	info "Skipping topic '${topic_name}'."
+
+	# continue with remaining topics
+	case "${command}" in
+	tag)
+		run_tag
+		;;
+	build)
+		run_build
+		;;
+	distribute)
+		run_distribute
+		;;
+	*)
+		bailout "cannot skip for command '${command}'"
+		;;
+	esac
 }
 
 ### command: continue ###
