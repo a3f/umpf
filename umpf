@@ -223,6 +223,8 @@ usage() {
 	                             Use <name> as topic name if specified.
 	                             Otherwise <commit-ish> must be the correct
 	                             topic name. The remote is removed if necessary.
+	  ref [-b base] <topic>      add reference to original topic branch as
+	                             an empty commit's message
 	  build <umpf>               build an umerge from another umpf
 	  distribute <commit-ish>    push patches not yet in any topic branch
 	                             upstream
@@ -1651,6 +1653,66 @@ do_merge() {
 	fi
 	prepare
 	merge "${@}"
+}
+
+### command: ref ###
+
+is_empty_commit() {
+	${GIT} rev-parse "$1"^ >/dev/null 2>&1 || return 1
+	${GIT} diff --quiet "$1"^ "$1"
+}
+
+do_ref() {
+	if [[ $# -ne 1 ]]; then
+		abort "usage: umpf ref <commit-ish>"
+	fi
+
+	local topic="${GIT_REMOTE}${1}"
+	if [ "$(${GIT} rev-parse --revs-only "${topic}" 2>/dev/null | wc -l)" -ne 1 ]; then
+		abort "usage: umpf [--base=<base>] ref <commit-ish>"
+	fi
+
+	if [ -z "${BASE}" ]; then
+		BASE="$(${GIT} merge-base "${topic}" HEAD)"
+		local tag="$(${GIT} describe --abbrev=0 ${topic})^{}"
+		if [ "${BASE}" != "$(${GIT} rev-parse ${tag})" ]; then
+			ncommits=$(GIT_PAGER="" ${GIT} log --oneline "${BASE}...${tag}" | wc -l)
+			info "Warning: merge-base $(${GIT} describe ${BASE}) is ${ncommits} commits older than topic branch's most recent tag"
+			if tty -s; then
+				read_interactive "Use more recent $(${GIT} describe ${tag}) instead? [y/n]" "y"
+				if [ "${choice}" == "y" ]; then
+					BASE="${tag}"
+				fi
+			fi
+		fi
+	elif ! ${GIT} merge-base --is-ancestor "$BASE" "${topic}" 2>/dev/null; then
+		abort "${BASE} is not an ancestor commit of ${topic}"
+	fi
+
+	local topic_name=$(git rev-parse --symbolic ${topic})
+	local ref_topic="umpf-ref-topic: ${topic_name#${GIT_REMOTE}}"
+	local ref_topic_range="umpf-ref-topic-range: $(${GIT} rev-parse ${BASE})..$(${GIT} rev-parse "${topic}")"
+
+	if is_empty_commit HEAD; then
+		local oldmsg=$(git log -1 --pretty=%B)
+
+		if grep -q '^umpf-' <<<"$oldmsg"; then
+			local newmsg="$(printf "%s\n" "$oldmsg" | sed \
+				-e "s|^umpf-ref-topic:.*|${ref_topic}|" \
+				-e "s|^umpf-ref-topic-range:.*|${ref_topic_range}|"
+			)"
+
+			${GIT} commit --allow-empty --amend -m "$newmsg"
+			return $?
+		fi
+	fi
+
+	git commit --allow-empty -F- <<EOF
+Port ${topic}
+
+${ref_topic}
+${ref_topic_range}
+EOF
 }
 
 ### namespace: diff ###
